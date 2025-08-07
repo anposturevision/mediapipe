@@ -16,6 +16,8 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 
 licenses(["notice"])
 
+package(default_visibility = ["//mediapipe/examples:__subpackages__"])
+
 # Linux only
 cc_binary(
     name = "hair_segmentation_gpu",

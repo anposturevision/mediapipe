@@ -15,6 +15,7 @@
 #include "mediapipe/util/filtering/low_pass_filter.h"
 
 #include "absl/log/absl_log.h"
+#include "absl/memory/memory.h"
 
 namespace mediapipe {
 

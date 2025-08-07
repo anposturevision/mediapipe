@@ -84,6 +84,14 @@ config_setting(
 )
 
 config_setting(
+    name = "opencv_prebuilt_folder_build",
+    define_values = {
+        "OPENCV": "prebuilt_folder",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "opencv_ios_arm64_source_build",
     define_values = {
         "OPENCV": "source",
@@ -164,6 +172,7 @@ alias(
     actual = select({
         ":opencv_source_build": ":opencv_cmake",
         ":opencv_prebuilt_build": ":opencv_prebuilt",
+        ":opencv_prebuilt_folder_build": "@opencv_prebuilt//:opencv",
         ":opencv_ios_sim_arm64_source_build": "@ios_opencv_source//:opencv",
         ":opencv_ios_arm64_source_build": "@ios_opencv_source//:opencv",
         ":opencv_ios_x86_64_source_build": "@ios_opencv_source//:opencv",

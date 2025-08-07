@@ -15,17 +15,16 @@
 #include "mediapipe/util/filtering/relative_velocity_filter.h"
 
 #include <cmath>
-#include <cstdint>
 #include <deque>
 
 #include "absl/log/absl_check.h"
 #include "absl/log/absl_log.h"
-#include "absl/time/time.h"
+#include "absl/memory/memory.h"
 
 namespace mediapipe {
 
-float RelativeVelocityFilter::Apply(absl::Duration timestamp, float value,
-                                    float value_scale) {
+float RelativeVelocityFilter::Apply(absl::Duration timestamp, float value_scale,
+                                    float value) {
   const int64_t new_timestamp = absl::ToInt64Nanoseconds(timestamp);
   if (last_timestamp_ >= new_timestamp) {
     // Results are unpredictable in this case, so nothing to do but

@@ -132,25 +132,67 @@ absl::Status GlContext::CreateContextInternal(EGLContext share_context,
       EGL_GREEN_SIZE, 8,
       EGL_BLUE_SIZE, 8,
       EGL_ALPHA_SIZE, 8,  // if you need the alpha channel
-      EGL_DEPTH_SIZE, 16,  // if you need the depth buffer
+      EGL_DEPTH_SIZE, 24,  // if you need the depth buffer
       EGL_NONE
       // clang-format on
   };
 
-  // TODO: improve config selection.
-  EGLint num_configs;
-  EGLBoolean success =
-      eglChooseConfig(display_, config_attr, &config_, 1, &num_configs);
-  if (!success) {
-    return ::mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
-           << "eglChooseConfig() returned error " << std::showbase << std::hex
-           << eglGetError();
+  EGLint num_configs = 0;
+  eglGetConfigs(display_, nullptr, 0, &num_configs);
+  std::vector<EGLConfig> configs(num_configs);
+  eglGetConfigs(display_, configs.data(), num_configs, &num_configs);
+  bool found_config = false;
+
+  for (int i = 0; i < num_configs; ++i) {
+    EGLint red, green, blue, alpha, depth, renderable_type, surface_type;
+    eglGetConfigAttrib(display_, configs[i], EGL_RED_SIZE, &red);
+    eglGetConfigAttrib(display_, configs[i], EGL_GREEN_SIZE, &green);
+    eglGetConfigAttrib(display_, configs[i], EGL_BLUE_SIZE, &blue);
+    eglGetConfigAttrib(display_, configs[i], EGL_ALPHA_SIZE, &alpha);
+    eglGetConfigAttrib(display_, configs[i], EGL_DEPTH_SIZE, &depth);
+    eglGetConfigAttrib(display_, configs[i], EGL_RENDERABLE_TYPE, &renderable_type);
+    eglGetConfigAttrib(display_, configs[i], EGL_SURFACE_TYPE, &surface_type);
+
+    // ABSL_LOG(INFO) << "Config " << i
+    //            << " R:" << red << " G:" << green << " B:" << blue
+    //            << " A:" << alpha << " D:" << depth
+    //            << " RenderableType:" << std::hex << renderable_type
+    //            << " SurfaceType:" << std::hex << surface_type;
+
+
+    if (red == 8 && green == 8 && blue == 8 &&
+        (alpha == 8) && (depth == 24) &&
+        (renderable_type & (gl_version == 3 ? EGL_OPENGL_ES3_BIT_KHR : EGL_OPENGL_ES2_BIT)) &&
+        (surface_type & EGL_PBUFFER_BIT)) {
+
+      config_ = configs[i];  // ✅ Chọn cấu hình phù hợp đầu tiên
+      found_config = true;
+      ABSL_LOG(INFO) << "Selected EGLConfig " << i
+                     << " for OpenGL ES " << gl_version;
+      break;
+    }
   }
-  if (!num_configs) {
+
+  if (!found_config) {
     return mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
            << "eglChooseConfig() returned no matching EGL configuration for "
-           << "RGBA8888 D16 ES" << gl_version << " request. ";
+           << "RGBA8888 D24 ES" << gl_version << " request. ";
   }
+
+  // TODO: improve config selection.
+  // EGLint num_configs;
+  // EGLBoolean success =
+  //     eglChooseConfig(display_, config_attr, &config_, 1, &num_configs);
+  // if (!success) {
+  //   return ::mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
+  //          << "eglChooseConfig() returned error " << std::showbase << std::hex
+  //          << eglGetError();
+  // }
+  // if (!num_configs) {
+  //   return mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
+  //          << "eglChooseConfig() returned no matching EGL configuration for "
+  //          << "RGBA8888 D24 ES" << gl_version << " request. ";
+  // }
 
   const EGLint context_attr[] = {
       // clang-format off

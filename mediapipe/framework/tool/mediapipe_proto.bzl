@@ -4,8 +4,7 @@
 # buildifier: disable=out-of-order-load
 load("//mediapipe/framework/tool:mediapipe_graph.bzl", "mediapipe_options_library")
 load("//mediapipe/framework/tool:mediapipe_proto_allowlist.bzl", "rewrite_target_list")
-load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
-load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@com_google_protobuf//:protobuf.bzl", "cc_proto_library", "py_proto_library")
 load("@rules_proto//proto:defs.bzl", _proto_library = "proto_library")
 load("@rules_proto_grpc//js:defs.bzl", "js_proto_library")
 
@@ -354,16 +353,15 @@ def mediapipe_proto_library(
             def_options_lib = False,
         )
 
-def mediapipe_py_proto_library(
+def mediapipe_py_proto_library_oss(
         name,
         srcs,
         visibility = None,
         py_proto_deps = [],
         proto_deps = None,
         api_version = None,
-        testonly = 0,
-        compatible_with = None):
-    """Generate py_proto_library.
+        testonly = 0):
+    """Generate py_proto_library for mediapipe open source version.
 
     Args:
       name: the name of the py_proto_library.
@@ -373,45 +371,46 @@ def mediapipe_py_proto_library(
       py_proto_deps: a list of dependency labels for Bazel use; must be py_proto_library.
       proto_deps: a list of dependency labels for bazel use.
       testonly: test only proto or not.
-      compatible_with: a list of environments the rule is compatible with.
     """
-    _ignore = [api_version, srcs]
-
+    _ignore = [api_version, proto_deps]
     py_proto_library(**provided_args(
         name = name,
+        srcs = srcs,
         visibility = visibility,
-        deps = proto_deps,
+        default_runtime = "@com_google_protobuf//:protobuf_python",
+        protoc = "@com_google_protobuf//:protoc",
+        deps = py_proto_deps + ["@com_google_protobuf//:protobuf_python"],
         testonly = testonly,
-        compatible_with = compatible_with,
     ))
 
-def mediapipe_cc_proto_library(
+def mediapipe_cc_proto_library_oss(
         name,
         srcs,
         visibility = None,
         deps = [],
         cc_deps = [],
-        testonly = 0,
-        compatible_with = None):
-    """Generate cc_proto_library.
+        testonly = 0):
+    """Generate cc_proto_library for mediapipe open source version.
 
-    Args:
-      name: the name of the cc_proto_library.
-      srcs: the .proto files of the cc_proto_library for Bazel use.
-      cc_deps: a list of dependency labels for Bazel use; must be cc_proto_library.
-      visibility: visibility of this target.
-      deps: a list of dependency labels for Bazel use; must be proto_library.
-      testonly: test only proto or not.
-      compatible_with: a list of environments the rule is compatible with.
+      Args:
+        name: the name of the cc_proto_library.
+        srcs: the .proto files of the cc_proto_library for Bazel use.
+        visibility: visibility of this target.
+        deps: a list of dependency labels for Bazel use; must be cc_proto_library.
+        testonly: test only proto or not.
     """
-    _ignore = [srcs, cc_deps]
+    _ignore = [deps]
 
     cc_proto_library(**provided_args(
         name = name,
+        srcs = srcs,
         visibility = visibility,
-        deps = deps,
+        deps = cc_deps,
         testonly = testonly,
-        compatible_with = compatible_with,
+        cc_libs = ["@com_google_protobuf//:protobuf"],
+        protoc = "@com_google_protobuf//:protoc",
+        default_runtime = "@com_google_protobuf//:protobuf",
+        alwayslink = 1,
     ))
 
 def mediapipe_js_proto_library_oss(
@@ -452,6 +451,12 @@ def mediapipe_js_proto_library_oss(
         deps = js_deps,
         visibility = visibility,
     )
+
+def mediapipe_py_proto_library(**kwargs):
+    mediapipe_py_proto_library_oss(**kwargs)
+
+def mediapipe_cc_proto_library(**kwargs):
+    mediapipe_cc_proto_library_oss(**kwargs)
 
 def mediapipe_js_proto_library(**kwargs):
     mediapipe_js_proto_library_oss(**kwargs)

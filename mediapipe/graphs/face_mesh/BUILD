@@ -22,6 +22,8 @@ licenses(["notice"])
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files(["face_mesh_gpu_lib.pbtxt"])
+
 cc_library(
     name = "desktop_calculators",
     deps = [
