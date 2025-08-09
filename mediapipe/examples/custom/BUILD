@@ -47,7 +47,7 @@ cc_binary(
     deps = [
         ":run_graph_gpu_lib",
         "//mediapipe/graphs/hand_tracking:mobile_calculators",
-        "//mediapipe/calculators/core:packet_presence_calculator",
+        "//mediapipe/graphs/face_mesh:mobile_calculators",
     ],
 )
 
@@ -76,6 +76,8 @@ cc_binary(
     data = [
         "//mediapipe/graphs/face_mesh:face_mesh_gpu_lib.pbtxt",
         "//mediapipe/modules/face_landmark:face_landmark_with_attention.tflite",
+        "//mediapipe/modules/face_detection:face_detection_short_range.tflite",
+        "//mediapipe/modules/face_detection:face_detection_full_range.tflite",
     ],
     deps = [
         ":run_graph_gpu_lib",

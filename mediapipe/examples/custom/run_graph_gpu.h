@@ -3,6 +3,9 @@
 #include <vector>
 #include <opencv2/core.hpp>
 
+// Forward declaration
+class MPPGraphRunner;
+
 struct LandmarkList {
     std::vector<cv::Point3f> landmarks;
     std::vector<float> visibility;
@@ -18,24 +21,34 @@ class GraphRunner {
 class HandTrackingGraphRunner : public GraphRunner {
     public:
         HandTrackingGraphRunner() = default;
-        ~HandTrackingGraphRunner() = default;
+        ~HandTrackingGraphRunner() {
+            if (runnerVoid) {
+                delete static_cast<MPPGraphRunner*>(runnerVoid);
+                runnerVoid = nullptr;
+            }
+        }
 
         bool initGraph(const std::string& calculator_graph_config_file);
         bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
 
     private:
-        void* runnerVoid;
+        void* runnerVoid = nullptr;
 };
 
 class FacemeshGraphRunner : public GraphRunner {
     public:
         FacemeshGraphRunner() = default;
-        ~FacemeshGraphRunner() = default;
+        ~FacemeshGraphRunner() {
+            if (runnerVoid) {
+                delete static_cast<MPPGraphRunner*>(runnerVoid);
+                runnerVoid = nullptr;
+            }
+        }
 
         bool initGraph(const std::string& calculator_graph_config_file);
         bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
 
     private:
-        void* runnerVoid;
+        void* runnerVoid = nullptr;
 };
 

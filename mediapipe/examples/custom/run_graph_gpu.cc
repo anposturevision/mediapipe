@@ -1,6 +1,8 @@
 #include "run_graph_gpu.h"
 
 #include <cstdint>
+#include <chrono>
+#include <thread>
 #include "absl/log/absl_log.h"
 #include "mediapipe/framework/calculator_framework.h"
 #include "mediapipe/framework/deps/status_macros.h"
@@ -34,6 +36,20 @@ class MPPGraphRunner {
             }
         }
 
+        ~MPPGraphRunner() {
+            // Clean up the graph
+            if (graph_.HasInputStream(kInputStream)) {
+                auto status = graph_.CloseInputStream(kInputStream);
+                if (!status.ok()) {
+                    ABSL_LOG(ERROR) << "Failed to close input stream: " << status.message();
+                }
+            }
+            auto status = graph_.WaitUntilDone();
+            if (!status.ok()) {
+                ABSL_LOG(ERROR) << "Graph did not finish properly: " << status.message();
+            }
+        }
+
         absl::Status InitMPPGraph(std::string calculator_graph_config_file) {
             std::string calculator_graph_config_contents;
             MP_RETURN_IF_ERROR(mediapipe::file::GetContents(
@@ -50,6 +66,8 @@ class MPPGraphRunner {
             ABSL_LOG(INFO) << "Initialize the GPU.";
             MP_ASSIGN_OR_RETURN(auto gpu_resources, mediapipe::GpuResources::Create());
             MP_RETURN_IF_ERROR(graph_.SetGpuResources(std::move(gpu_resources)));
+            
+            // Initialize GPU helper
             gpu_helper_.InitializeForTest(graph_.GetGpuResources().get());
 
             ABSL_LOG(INFO) << "Initialize output stream poller.";
@@ -87,9 +105,25 @@ class MPPGraphRunner {
                 })
             );
 
+            // Wait for the graph to process this specific timestamp
+            MP_RETURN_IF_ERROR(graph_.WaitUntilIdle());
+
+            // Check the queue - if there's a packet, get it; if not, no hands detected
             mediapipe::Packet packet_landmarks;
-            poller_landmarks_->Next(&packet_landmarks);
-            landmarks = packet_landmarks.Get<std::vector<mediapipe::NormalizedLandmarkList>>();
+            int queue_size = poller_landmarks_->QueueSize();
+            
+            if (queue_size > 0) {
+                bool has_packet = poller_landmarks_->Next(&packet_landmarks);
+                if (has_packet && !packet_landmarks.IsEmpty()) {
+                    landmarks = packet_landmarks.Get<std::vector<mediapipe::NormalizedLandmarkList>>();
+                } else {
+                    landmarks.clear();
+                    ABSL_LOG(WARNING) << "No landmarks found in the packet.";
+                }
+            } else {
+                // No packet in queue means no hands detected
+                landmarks.clear();
+            }
 
             return absl::OkStatus();
         }
@@ -104,13 +138,15 @@ class MPPGraphRunner {
 };
 
 bool HandTrackingGraphRunner::initGraph(const std::string& calculator_graph_config_file) {
-    MPPGraphRunner mpp_graph_runner("hand_landmarks");
-    absl::Status status = mpp_graph_runner.InitMPPGraph(calculator_graph_config_file);
+    // Create the runner on the heap to ensure it persists
+    MPPGraphRunner* mpp_graph_runner = new MPPGraphRunner("hand_landmarks");
+    absl::Status status = mpp_graph_runner->InitMPPGraph(calculator_graph_config_file);
     if (!status.ok()) {
         ABSL_LOG(ERROR) << "Failed to initialize graph: " << status.message();
+        delete mpp_graph_runner;
         return false;
     }
-    runnerVoid = &mpp_graph_runner; // Store the runner in a void pointer
+    runnerVoid = mpp_graph_runner; // Store the runner pointer
     return true;
 }
 
@@ -141,13 +177,15 @@ bool HandTrackingGraphRunner::ProcessFrame(cv::Mat &camera_frame, size_t frame_t
 }
 
 bool FacemeshGraphRunner::initGraph(const std::string& calculator_graph_config_file) {
-    MPPGraphRunner mpp_graph_runner("face_mesh");
-    absl::Status status = mpp_graph_runner.InitMPPGraph(calculator_graph_config_file);
+    // Create the runner on the heap to ensure it persists
+    MPPGraphRunner* mpp_graph_runner = new MPPGraphRunner("face_mesh");
+    absl::Status status = mpp_graph_runner->InitMPPGraph(calculator_graph_config_file);
     if (!status.ok()) {
         ABSL_LOG(ERROR) << "Failed to initialize graph: " << status.message();
+        delete mpp_graph_runner;
         return false;
     }
-    runnerVoid = &mpp_graph_runner; // Store the runner in a void pointer
+    runnerVoid = mpp_graph_runner; // Store the runner pointer
     return true;
 }
 
