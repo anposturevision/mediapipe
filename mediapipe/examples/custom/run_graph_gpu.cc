@@ -137,6 +137,13 @@ class MPPGraphRunner {
         std::unique_ptr<mediapipe::OutputStreamPoller> poller_landmarks_;
 };
 
+HandTrackingGraphRunner::~HandTrackingGraphRunner() {
+    if (runnerVoid) {
+        delete static_cast<MPPGraphRunner*>(runnerVoid);
+        runnerVoid = nullptr;
+    }
+}
+
 bool HandTrackingGraphRunner::initGraph(const std::string& calculator_graph_config_file) {
     // Create the runner on the heap to ensure it persists
     MPPGraphRunner* mpp_graph_runner = new MPPGraphRunner("hand_landmarks");
@@ -174,6 +181,13 @@ bool HandTrackingGraphRunner::ProcessFrame(cv::Mat &camera_frame, size_t frame_t
     }
 
 	return status.ok();
+}
+
+FacemeshGraphRunner::~FacemeshGraphRunner() {
+    if (runnerVoid) {
+        delete static_cast<MPPGraphRunner*>(runnerVoid);
+        runnerVoid = nullptr;
+    }
 }
 
 bool FacemeshGraphRunner::initGraph(const std::string& calculator_graph_config_file) {

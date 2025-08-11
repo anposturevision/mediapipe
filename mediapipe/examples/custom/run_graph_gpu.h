@@ -21,12 +21,7 @@ class GraphRunner {
 class HandTrackingGraphRunner : public GraphRunner {
     public:
         HandTrackingGraphRunner() = default;
-        ~HandTrackingGraphRunner() {
-            if (runnerVoid) {
-                delete static_cast<MPPGraphRunner*>(runnerVoid);
-                runnerVoid = nullptr;
-            }
-        }
+        ~HandTrackingGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
         bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
@@ -38,12 +33,7 @@ class HandTrackingGraphRunner : public GraphRunner {
 class FacemeshGraphRunner : public GraphRunner {
     public:
         FacemeshGraphRunner() = default;
-        ~FacemeshGraphRunner() {
-            if (runnerVoid) {
-                delete static_cast<MPPGraphRunner*>(runnerVoid);
-                runnerVoid = nullptr;
-            }
-        }
+        ~FacemeshGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
         bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
