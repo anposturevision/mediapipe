@@ -1,3 +1,6 @@
+#ifndef RUN_GRAPH_GPU_H
+#define RUN_GRAPH_GPU_H
+
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -15,7 +18,7 @@ class GraphRunner {
     public:
         virtual ~GraphRunner() = default;
         virtual bool initGraph(const std::string& calculator_graph_config_file) = 0;
-        virtual bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) = 0;
+        virtual bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) = 0;
 };
 
 class HandTrackingGraphRunner : public GraphRunner {
@@ -24,7 +27,7 @@ class HandTrackingGraphRunner : public GraphRunner {
         ~HandTrackingGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
-        bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
 
     private:
         void* runnerVoid = nullptr;
@@ -36,9 +39,11 @@ class FacemeshGraphRunner : public GraphRunner {
         ~FacemeshGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
-        bool ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
 
     private:
         void* runnerVoid = nullptr;
 };
+
+#endif // RUN_GRAPH_GPU_H
 

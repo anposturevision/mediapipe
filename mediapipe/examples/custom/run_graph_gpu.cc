@@ -55,22 +55,22 @@ class MPPGraphRunner {
             MP_RETURN_IF_ERROR(mediapipe::file::GetContents(
                 calculator_graph_config_file,
                 &calculator_graph_config_contents));
-            ABSL_LOG(INFO) << "Get calculator graph config contents: "
-                    << calculator_graph_config_contents;
+            // ABSL_LOG(INFO) << "Get calculator graph config contents: "
+            //         << calculator_graph_config_contents;
             mediapipe::CalculatorGraphConfig config =
                 mediapipe::ParseTextProtoOrDie<mediapipe::CalculatorGraphConfig>(calculator_graph_config_contents);
 
-            ABSL_LOG(INFO) << "Initialize the calculator graph.";
+            // ABSL_LOG(INFO) << "Initialize the calculator graph.";
             MP_RETURN_IF_ERROR(graph_.Initialize(config));
 
-            ABSL_LOG(INFO) << "Initialize the GPU.";
+            // ABSL_LOG(INFO) << "Initialize the GPU.";
             MP_ASSIGN_OR_RETURN(auto gpu_resources, mediapipe::GpuResources::Create());
             MP_RETURN_IF_ERROR(graph_.SetGpuResources(std::move(gpu_resources)));
             
             // Initialize GPU helper
             gpu_helper_.InitializeForTest(graph_.GetGpuResources().get());
 
-            ABSL_LOG(INFO) << "Initialize output stream poller.";
+            // ABSL_LOG(INFO) << "Initialize output stream poller.";
 
             MP_ASSIGN_OR_RETURN(mediapipe::OutputStreamPoller poller_landmarks_tmp,
                             graph_.AddOutputStreamPoller(kOutputStream_));
@@ -78,11 +78,11 @@ class MPPGraphRunner {
 
 
             MP_RETURN_IF_ERROR(graph_.StartRun({}));
-            ABSL_LOG(INFO) << "Graph initialized successfully.";
+            // ABSL_LOG(INFO) << "Graph initialized successfully.";
             return absl::OkStatus();
         }
 
-        absl::Status ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<mediapipe::NormalizedLandmarkList> &landmarks) {
+        absl::Status processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<mediapipe::NormalizedLandmarkList> &landmarks) {
             cv::cvtColor(camera_frame, camera_frame, cv::COLOR_BGR2RGBA);
             auto input_frame = absl::make_unique<mediapipe::ImageFrame>(
                 mediapipe::ImageFormat::SRGBA, camera_frame.cols, camera_frame.rows,
@@ -118,7 +118,7 @@ class MPPGraphRunner {
                     landmarks = packet_landmarks.Get<std::vector<mediapipe::NormalizedLandmarkList>>();
                 } else {
                     landmarks.clear();
-                    ABSL_LOG(WARNING) << "No landmarks found in the packet.";
+                    // ABSL_LOG(WARNING) << "No landmarks found in the packet.";
                 }
             } else {
                 // No packet in queue means no hands detected
@@ -157,10 +157,10 @@ bool HandTrackingGraphRunner::initGraph(const std::string& calculator_graph_conf
     return true;
 }
 
-bool HandTrackingGraphRunner::ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
+bool HandTrackingGraphRunner::processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
     MPPGraphRunner &runner = *(MPPGraphRunner *)runnerVoid;
     std::vector<mediapipe::NormalizedLandmarkList> landmarks_tmp;
-    absl::Status status = runner.ProcessFrame(camera_frame, frame_timestamp_us, landmarks_tmp);
+    absl::Status status = runner.processFrame(camera_frame, frame_timestamp_us, landmarks_tmp);
     if (!status.ok()) {
         std::cout << "Failed to process the frame: " << status.message() << std::endl;
         return false;
@@ -203,10 +203,10 @@ bool FacemeshGraphRunner::initGraph(const std::string& calculator_graph_config_f
     return true;
 }
 
-bool FacemeshGraphRunner::ProcessFrame(cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
+bool FacemeshGraphRunner::processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
     MPPGraphRunner &runner = *(MPPGraphRunner *)runnerVoid;
     std::vector<mediapipe::NormalizedLandmarkList> landmarks_tmp;
-    absl::Status status = runner.ProcessFrame(camera_frame, frame_timestamp_us, landmarks_tmp);
+    absl::Status status = runner.processFrame(camera_frame, frame_timestamp_us, landmarks_tmp);
     if (!status.ok()) {
         std::cout << "Failed to process the frame: " << status.message() << std::endl;
         return false;
