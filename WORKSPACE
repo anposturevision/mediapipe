@@ -572,25 +572,10 @@ http_archive(
     url = "https://github.com/ceres-solver/ceres-solver/archive/123fba61cf2611a3c8bddc9d91416db26b10b558.zip",
 )
 
-http_archive(
-    name = "opencv",
-    build_file_content = all_content,
-    strip_prefix = "opencv-3.4.11",
-    urls = ["https://github.com/opencv/opencv/archive/3.4.11.tar.gz"],
-)
-
 new_local_repository(
     name = "linux_opencv",
-    build_file = "@//third_party:opencv_linux.BUILD",
-    path = "/usr",
-)
-
-# Prebuilt OpenCV - use this for prebuilt OpenCV installations
-new_local_repository(
-    name = "opencv_prebuilt",
     build_file = "@//third_party:opencv_prebuilt.BUILD",
     path = "/usr/local",
-    #path = "/home/ligirk/workspace/libs/opencv/install"
 )
 
 new_local_repository(

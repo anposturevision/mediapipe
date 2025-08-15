@@ -83,7 +83,6 @@ class MPPGraphRunner {
         }
 
         absl::Status processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<mediapipe::NormalizedLandmarkList> &landmarks) {
-            cv::cvtColor(camera_frame, camera_frame, cv::COLOR_BGR2RGBA);
             auto input_frame = absl::make_unique<mediapipe::ImageFrame>(
                 mediapipe::ImageFormat::SRGBA, camera_frame.cols, camera_frame.rows,
                 mediapipe::ImageFrame::kGlDefaultAlignmentBoundary);
