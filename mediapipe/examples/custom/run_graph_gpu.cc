@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <memory>
+#include <mutex>
 #include "absl/log/absl_log.h"
 #include "mediapipe/framework/calculator_framework.h"
 #include "mediapipe/framework/deps/status_macros.h"
@@ -26,6 +27,11 @@
 #include "mediapipe/framework/deps/scoped_model_resources.h"
 #include "mediapipe/framework/deps/scoped_options_registry.h"
 
+// CUDA and OpenCV CUDA support
+#include <opencv2/core/cuda.hpp>
+#include <cuda_gl_interop.h>
+#include <cuda_runtime.h>
+
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
 #else
@@ -35,6 +41,7 @@
 // const char kLandmarksOutputStream[] = "hand_landmarks";
 // const char kHandednessOutputStream[] = "handedness";
 const char kInputStream[] = "input_video";
+
 
 class MPPGraphRunner {
     public:
@@ -64,138 +71,185 @@ class MPPGraphRunner {
         }
 
         ~MPPGraphRunner() {
-            // Proper cleanup sequence to prevent memory leaks
             ABSL_LOG(INFO) << "Destroying MPPGraphRunner for model: " << model_id_;
             
-            // 1. Close input stream first
-            if (graph_.HasInputStream(kInputStream)) {
-                auto status = graph_.CloseInputStream(kInputStream);
-                if (!status.ok()) {
-                    ABSL_LOG(ERROR) << "Failed to close input stream: " << status.message();
+            // Clean up OpenGL texture properly
+            if (reusable_gl_texture_ != 0) {
+                ABSL_LOG(INFO) << "Cleaning up GL texture handle: " << reusable_gl_texture_;
+                if (gpu_helper_.Initialized()) {
+                    try {
+                        gpu_helper_.RunInGlContext([this]() -> absl::Status {
+                            glDeleteTextures(1, &reusable_gl_texture_);
+                            return absl::OkStatus();
+                        });
+                    } catch (...) {
+                        ABSL_LOG(WARNING) << "Failed to delete OpenGL texture in destructor";
+                    }
                 }
+                reusable_gl_texture_ = 0;
             }
             
-            // 2. Reset poller before shutting down graph
+            // Reset smart pointers - let them clean up automatically
             poller_landmarks_.reset();
-            
-            // 3. Wait for graph to finish processing and then shut it down
-            auto status = graph_.WaitUntilDone();
-            if (!status.ok()) {
-                ABSL_LOG(ERROR) << "Graph did not finish properly: " << status.message();
-            }
-            
-            // 4. Explicitly clean up GPU resources in the correct context
-            if (gpu_helper_.Initialized()) {
-                gpu_helper_.RunInGlContext([this]() -> absl::Status {
-                    // Force cleanup of any remaining GPU resources
-                    glFinish(); // Wait for all GPU operations to complete
-                    return absl::OkStatus();
-                });
-            }
-            
-            // 5. Clean up lifecycle-managed resources
-            // This will automatically clean up all registered resources, caches, and registrations
-            lifecycle_manager_.reset();  // This triggers all cleanup functions
+            lifecycle_manager_.reset();
             resource_cache_.reset();
             options_registry_.reset();
             
-            ABSL_LOG(INFO) << "MPPGraphRunner cleanup completed for model: " << model_id_;
-            
-            // 6. The graph destructor will handle the rest of the cleanup
+            // Let the graph destructor handle the rest
         }
 
         absl::Status InitMPPGraph(std::string calculator_graph_config_file) {
+            // Add initialization lock to prevent race conditions
+            static std::mutex init_mutex;
+            std::lock_guard<std::mutex> lock(init_mutex);
+            
             std::string calculator_graph_config_contents;
             MP_RETURN_IF_ERROR(mediapipe::file::GetContents(
                 calculator_graph_config_file,
                 &calculator_graph_config_contents));
-            // ABSL_LOG(INFO) << "Get calculator graph config contents: "
-            //         << calculator_graph_config_contents;
+            
             mediapipe::CalculatorGraphConfig config =
                 mediapipe::ParseTextProtoOrDie<mediapipe::CalculatorGraphConfig>(calculator_graph_config_contents);
 
-            // ABSL_LOG(INFO) << "Initialize the calculator graph.";
+            // Initialize the calculator graph
             MP_RETURN_IF_ERROR(graph_.Initialize(config));
 
-            // ABSL_LOG(INFO) << "Initialize the GPU.";
-            MP_ASSIGN_OR_RETURN(auto gpu_resources, mediapipe::GpuResources::Create());
-            MP_RETURN_IF_ERROR(graph_.SetGpuResources(std::move(gpu_resources)));
+            // Create GPU resources for this instance
+            MP_ASSIGN_OR_RETURN(gpu_resources_, mediapipe::GpuResources::Create());
+            ABSL_LOG(INFO) << "GPU resources created for model: " << model_id_;
             
-            // Initialize GPU helper
-            gpu_helper_.InitializeForTest(graph_.GetGpuResources().get());
+            // Set the GPU resources for this instance
+            MP_RETURN_IF_ERROR(graph_.SetGpuResources(gpu_resources_));
+            
+            // Initialize GPU helper with instance resources
+            gpu_helper_.InitializeForTest(gpu_resources_.get());
 
-            // ABSL_LOG(INFO) << "Initialize output stream poller.";
-
+            // Initialize output stream poller with non-blocking mode
             MP_ASSIGN_OR_RETURN(mediapipe::OutputStreamPoller poller_landmarks_tmp,
                             graph_.AddOutputStreamPoller(kOutputStream_));
             poller_landmarks_ = std::make_unique<mediapipe::OutputStreamPoller>(std::move(poller_landmarks_tmp));
 
-
+            // Start the graph
             MP_RETURN_IF_ERROR(graph_.StartRun({}));
-            // ABSL_LOG(INFO) << "Graph initialized successfully.";
+            
             return absl::OkStatus();
         }
 
-        absl::Status processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<mediapipe::NormalizedLandmarkList> &landmarks) {
-            auto input_frame = absl::make_unique<mediapipe::ImageFrame>(
-                mediapipe::ImageFormat::SRGBA, camera_frame.cols, camera_frame.rows,
-                mediapipe::ImageFrame::kGlDefaultAlignmentBoundary);
-            cv::Mat input_frame_mat = mediapipe::formats::MatView(input_frame.get());
-            camera_frame.copyTo(input_frame_mat);
-
+        absl::Status processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<mediapipe::NormalizedLandmarkList> &landmarks) {
             MP_RETURN_IF_ERROR(
-                gpu_helper_.RunInGlContext([this, &input_frame, &frame_timestamp_us]() -> absl::Status {
-                    // Convert ImageFrame to GpuBuffer - using the efficient MediaPipe pattern
-                    auto texture = gpu_helper_.CreateSourceTexture(*input_frame.get());
-                    auto gpu_frame = texture.GetFrame<mediapipe::GpuBuffer>();
+                gpu_helper_.RunInGlContext([&]() -> absl::Status {
+                // Create or resize GL texture only when needed
+                if (reusable_gl_texture_ == 0 || 
+                    texture_width_ != camera_frame.cols || 
+                    texture_height_ != camera_frame.rows) {
                     
-                    // Send GPU image packet into the graph.
-                    MP_RETURN_IF_ERROR(graph_.AddPacketToInputStream(
-                        kInputStream, mediapipe::Adopt(gpu_frame.release())
-                                        .At(mediapipe::Timestamp(frame_timestamp_us))));
+                    if (reusable_gl_texture_ != 0) {
+                        glDeleteTextures(1, &reusable_gl_texture_);
+                    }
                     
-                    // Release texture after packet is sent - this was the key fix
-                    texture.Release();
-                    // Force GPU to complete operations before returning
-                    glFlush();
-                    glFinish(); // Wait for GPU operations to complete
-                    return absl::OkStatus();
+                    glGenTextures(1, &reusable_gl_texture_);
+                    glBindTexture(GL_TEXTURE_2D, reusable_gl_texture_);
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 
+                                camera_frame.cols, camera_frame.rows,
+                                0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+                    
+                    texture_width_ = camera_frame.cols;
+                    texture_height_ = camera_frame.rows;
+                } else {
+                    glBindTexture(GL_TEXTURE_2D, reusable_gl_texture_);
+                }
+                
+                // Use CUDA-OpenGL interop (zero-copy GPU-to-GPU transfer)
+                cudaGraphicsResource_t cuda_resource;
+                cudaError_t cuda_status = cudaGraphicsGLRegisterImage(&cuda_resource, reusable_gl_texture_,
+                                                GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+                if (cuda_status != cudaSuccess) {
+                    return absl::InternalError("Failed to register GL texture with CUDA");
+                }
+                
+                cuda_status = cudaGraphicsMapResources(1, &cuda_resource);
+                if (cuda_status != cudaSuccess) {
+                    cudaGraphicsUnregisterResource(cuda_resource);
+                    return absl::InternalError("Failed to map CUDA resources");
+                }
+                
+                cudaArray_t cuda_array;
+                cuda_status = cudaGraphicsSubResourceGetMappedArray(&cuda_array, cuda_resource, 0, 0);
+                if (cuda_status != cudaSuccess) {
+                    cudaGraphicsUnmapResources(1, &cuda_resource);
+                    cudaGraphicsUnregisterResource(cuda_resource);
+                    return absl::InternalError("Failed to get mapped CUDA array");
+                }
+                
+                cuda_status = cudaMemcpy2DToArray(cuda_array, 0, 0,
+                                    camera_frame.data, camera_frame.step,
+                                    camera_frame.cols * camera_frame.elemSize(), 
+                                    camera_frame.rows,
+                                    cudaMemcpyDeviceToDevice);
+                if (cuda_status != cudaSuccess) {
+                    cudaGraphicsUnmapResources(1, &cuda_resource);
+                    cudaGraphicsUnregisterResource(cuda_resource);
+                    return absl::InternalError("Failed to copy data to CUDA array");
+                }
+                
+                // Unmap and unregister CUDA resource immediately after use
+                cuda_status = cudaGraphicsUnmapResources(1, &cuda_resource);
+                if (cuda_status != cudaSuccess) {
+                    ABSL_LOG(WARNING) << "Failed to unmap CUDA resources: " << cuda_status;
+                }
+                cuda_status = cudaGraphicsUnregisterResource(cuda_resource);
+                if (cuda_status != cudaSuccess) {
+                    ABSL_LOG(WARNING) << "Failed to unregister CUDA resource: " << cuda_status;
+                }
+                
+                // Wrap GL texture as GpuBuffer
+                auto texture_buffer = mediapipe::GlTextureBuffer::Wrap(
+                    GL_TEXTURE_2D, reusable_gl_texture_,
+                    camera_frame.cols, camera_frame.rows,
+                    mediapipe::GpuBufferFormat::kBGRA32,
+                    gpu_helper_.GetSharedGlContext(),
+                    [](std::shared_ptr<mediapipe::GlSyncPoint> sync) {}
+                );
+                
+                auto gpu_buffer = mediapipe::GpuBuffer(std::move(texture_buffer));
+                
+                // Send to graph
+                MP_RETURN_IF_ERROR(graph_.AddPacketToInputStream(
+                    kInputStream, 
+                    mediapipe::MakePacket<mediapipe::GpuBuffer>(gpu_buffer)
+                        .At(mediapipe::Timestamp(frame_timestamp_us))
+                ));
+                
+                return absl::OkStatus();
                 })
             );
-
+            
             // Wait for the graph to process this specific timestamp
             MP_RETURN_IF_ERROR(graph_.WaitUntilIdle());
 
-            // Check the queue - if there's a packet, get it; if not, no hands detected
+            // Check the queue - if there's a packet, get it; if not, no face detected
             mediapipe::Packet packet_landmarks;
             int queue_size = poller_landmarks_->QueueSize();
             
             if (queue_size > 0) {
-                bool has_packet = poller_landmarks_->Next(&packet_landmarks);
-                if (has_packet && !packet_landmarks.IsEmpty()) {
-                    landmarks = packet_landmarks.Get<std::vector<mediapipe::NormalizedLandmarkList>>();
-                } else {
-                    landmarks.clear();
-                    // ABSL_LOG(WARNING) << "No landmarks found in the packet.";
-                }
+            bool has_packet = poller_landmarks_->Next(&packet_landmarks);
+            if (has_packet && !packet_landmarks.IsEmpty()) {
+                landmarks = packet_landmarks.Get<std::vector<mediapipe::NormalizedLandmarkList>>();
             } else {
-                // No packet in queue means no hands detected
                 landmarks.clear();
             }
-
-            // Force cleanup of any temporary GPU resources after processing
-            if (gpu_helper_.Initialized()) {
-                gpu_helper_.RunInGlContext([]() -> absl::Status {
-                    glFlush();
-                    return absl::OkStatus();
-                });
+            } else {
+            // No packet in queue means no face detected
+            landmarks.clear();
             }
-
+            
             return absl::OkStatus();
         }
 
         // Add explicit cleanup method
         void cleanup() {
+            ABSL_LOG(INFO) << "Starting explicit cleanup for model: " << model_id_;
+            
             // Close input stream
             if (graph_.HasInputStream(kInputStream)) {
                 auto status = graph_.CloseInputStream(kInputStream);
@@ -213,17 +267,52 @@ class MPPGraphRunner {
                 ABSL_LOG(ERROR) << "Graph cleanup error: " << status.message();
             }
             
+            // Clean up OpenGL texture
+            if (reusable_gl_texture_ != 0 && gpu_helper_.Initialized()) {
+                gpu_helper_.RunInGlContext([this]() -> absl::Status {
+                    glDeleteTextures(1, &reusable_gl_texture_);
+                    return absl::OkStatus();
+                });
+                reusable_gl_texture_ = 0;
+            }
+            
             if (gpu_helper_.Initialized()) {
                 gpu_helper_.RunInGlContext([]() -> absl::Status {
                     glFinish();
                     return absl::OkStatus();
                 });
             }
+            
+            // Clean up instance GPU resources
+            if (gpu_resources_) {
+                gpu_resources_.reset();
+                ABSL_LOG(INFO) << "GPU resources cleaned up for model: " << model_id_;
+            }
+            
+            ABSL_LOG(INFO) << "Explicit cleanup completed for model: " << model_id_;
+        }
+
+        // Reset tracking state by restarting the graph
+        absl::Status resetTracking() {
+            ABSL_LOG(INFO) << "Resetting tracking state for model: " << model_id_;
+            
+            // Close all input streams to stop processing
+            MP_RETURN_IF_ERROR(graph_.CloseAllPacketSources());
+            
+            // Wait for graph to finish processing current packets
+            MP_RETURN_IF_ERROR(graph_.WaitUntilDone());
+            
+            // Restart the graph - this clears all calculator state including tracking
+            MP_RETURN_IF_ERROR(graph_.StartRun({}));
+            
+            ABSL_LOG(INFO) << "Tracking state reset completed for model: " << model_id_;
+            return absl::OkStatus();
         }
 
     private:
-        mediapipe::CalculatorGraph graph_;
         mediapipe::GlCalculatorHelper gpu_helper_;
+        mediapipe::CalculatorGraph graph_;
+        std::shared_ptr<mediapipe::GpuResources> gpu_resources_;
 
         std::string task_;
         std::string kOutputStream_ = "";
@@ -234,7 +323,13 @@ class MPPGraphRunner {
         std::unique_ptr<mediapipe::ScopedModelManager> lifecycle_manager_;
         std::unique_ptr<mediapipe::ScopedModelResourcesCache> resource_cache_;
         std::unique_ptr<mediapipe::ScopedOptionsRegistry> options_registry_;
+        
+        // CUDA-OpenGL interop members
+        GLuint reusable_gl_texture_ = 0;
+        int texture_width_ = 0;
+        int texture_height_ = 0;
 };
+
 
 HandTrackingGraphRunner::~HandTrackingGraphRunner() {
     if (runnerVoid != nullptr) {
@@ -259,7 +354,7 @@ bool HandTrackingGraphRunner::initGraph(const std::string& calculator_graph_conf
     return true;
 }
 
-bool HandTrackingGraphRunner::processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
+bool HandTrackingGraphRunner::processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
     MPPGraphRunner &runner = *(MPPGraphRunner *)runnerVoid;
     std::vector<mediapipe::NormalizedLandmarkList> landmarks_tmp;
     absl::Status status = runner.processFrame(camera_frame, frame_timestamp_us, landmarks_tmp);
@@ -291,6 +386,19 @@ void HandTrackingGraphRunner::cleanup() {
     }
 }
 
+bool HandTrackingGraphRunner::resetTracking() {
+    if (runnerVoid != nullptr) {
+        MPPGraphRunner* runner = static_cast<MPPGraphRunner*>(runnerVoid);
+        absl::Status status = runner->resetTracking();
+        if (!status.ok()) {
+            std::cout << "Failed to reset tracking: " << status.message() << std::endl;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
 FacemeshGraphRunner::~FacemeshGraphRunner() {
     if (runnerVoid != nullptr) {
         MPPGraphRunner* runner = static_cast<MPPGraphRunner*>(runnerVoid);
@@ -314,7 +422,7 @@ bool FacemeshGraphRunner::initGraph(const std::string& calculator_graph_config_f
     return true;
 }
 
-bool FacemeshGraphRunner::processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
+bool FacemeshGraphRunner::processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) {
     MPPGraphRunner &runner = *(MPPGraphRunner *)runnerVoid;
     std::vector<mediapipe::NormalizedLandmarkList> landmarks_tmp;
     absl::Status status = runner.processFrame(camera_frame, frame_timestamp_us, landmarks_tmp);
@@ -344,4 +452,17 @@ void FacemeshGraphRunner::cleanup() {
     if (runnerVoid != nullptr) {
         static_cast<MPPGraphRunner*>(runnerVoid)->cleanup();
     }
+}
+
+bool FacemeshGraphRunner::resetTracking() {
+    if (runnerVoid != nullptr) {
+        MPPGraphRunner* runner = static_cast<MPPGraphRunner*>(runnerVoid);
+        absl::Status status = runner->resetTracking();
+        if (!status.ok()) {
+            std::cout << "Failed to reset tracking: " << status.message() << std::endl;
+            return false;
+        }
+        return true;
+    }
+    return false;
 }

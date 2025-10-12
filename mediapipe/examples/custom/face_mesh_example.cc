@@ -1,13 +1,25 @@
 #include "mediapipe/examples/custom/run_graph_gpu.h"
 #include "mediapipe/framework/port/opencv_highgui_inc.h"
+#include "mediapipe/framework/port/opencv_imgproc_inc.h"
 #include <iostream>
 #include <chrono>
 #include <vector>
 #include <numeric>
 #include <cmath>
 #include <algorithm>
+#include <csignal>
+#include <cstdlib>
+
+void signal_handler(int signal) {
+    std::cerr << "Received signal " << signal << " - exiting gracefully" << std::endl;
+    exit(0);
+}
 
 int main() {
+    // Set up signal handler to catch segfaults
+    signal(SIGSEGV, signal_handler);
+    signal(SIGABRT, signal_handler);
+    
     try {
         FacemeshGraphRunner face_mesh;
         std::string graph_config = "/mediapipe/mediapipe/graphs/face_mesh/face_mesh_gpu_lib.pbtxt";
@@ -26,6 +38,11 @@ int main() {
         }
         std::cout << "Image loaded successfully. Size: " << camera_frame.cols << "x" << camera_frame.rows << std::endl;
 
+        // Convert to GPU memory for CUDA processing
+        cv::cuda::GpuMat gpu_frame;
+        gpu_frame.upload(camera_frame);
+        std::cout << "Image uploaded to GPU memory." << std::endl;
+
         // Performance evaluation parameters
         const int num_iterations = 100;  // Number of times to run inference
         const int warmup_iterations = 10; // Warmup runs (not counted in timing)
@@ -42,7 +59,7 @@ int main() {
         // Warmup runs
         for (int i = 0; i < warmup_iterations; i++) {
             std::vector<LandmarkList> landmarks;
-            if (!face_mesh.processFrame(camera_frame, current_timestamp_us, landmarks)) {
+            if (!face_mesh.processFrame(gpu_frame, current_timestamp_us, landmarks)) {
                 std::cerr << "Failed to process frame during warmup iteration " << i << std::endl;
                 return -1;
             }
@@ -59,7 +76,7 @@ int main() {
             
             auto start_time = std::chrono::high_resolution_clock::now();
             
-            if (!face_mesh.processFrame(camera_frame, current_timestamp_us, landmarks)) {
+            if (!face_mesh.processFrame(gpu_frame, current_timestamp_us, landmarks)) {
                 std::cerr << "Failed to process frame during iteration " << i << std::endl;
                 return -1;
             }
@@ -112,7 +129,7 @@ int main() {
         std::vector<LandmarkList> final_landmarks;
         
         std::cout << "\n=== Final Frame Results ===" << std::endl;
-        if (!face_mesh.processFrame(camera_frame, current_timestamp_us, final_landmarks)) {
+        if (!face_mesh.processFrame(gpu_frame, current_timestamp_us, final_landmarks)) {
             std::cerr << "Failed to process final verification frame." << std::endl;
             return -1;
         }

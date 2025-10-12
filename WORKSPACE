@@ -697,6 +697,13 @@ load(
 
 cuda_configure(name = "local_config_cuda")
 
+# Local CUDA repository for system CUDA libraries
+new_local_repository(
+    name = "cuda_system",
+    build_file = "@//third_party:cuda_system.BUILD",
+    path = "/usr/local/cuda-12.5",
+)
+
 # Edge TPU
 http_archive(
     name = "libedgetpu",

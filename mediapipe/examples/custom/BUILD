@@ -40,6 +40,8 @@ cc_library(
         "//mediapipe/framework/deps:model_lifecycle_manager",
         "//mediapipe/framework/deps:scoped_model_resources",
         "//mediapipe/framework/deps:scoped_options_registry",
+        "@cuda_system//:cuda_runtime",
+        "@cuda_system//:cuda_gl_interop",
     ],
     alwayslink = 1,
 )
@@ -52,6 +54,13 @@ cc_binary(
         ":run_graph_gpu_lib",
         "//mediapipe/graphs/hand_tracking:mobile_calculators",
         "//mediapipe/graphs/face_mesh:mobile_calculators",
+        "@cuda_system//:cuda_runtime",
+        "@cuda_system//:cuda_gl_interop",
+    ],
+    linkopts = [
+        "-L/usr/local/cuda-12.5/targets/x86_64-linux/lib",
+        "-lcudart",
+        "-lcuda",
     ],
 )
 
@@ -89,5 +98,12 @@ cc_binary(
         "//mediapipe/framework/port:opencv_highgui",
         "//mediapipe/framework/port:opencv_imgproc",
         "@com_google_absl//absl/log:absl_log",
+        "@cuda_system//:cuda_runtime",
+        "@cuda_system//:cuda_gl_interop",
+    ],
+    linkopts = [
+        "-L/usr/local/cuda-12.5/targets/x86_64-linux/lib",
+        "-lcudart",
+        "-lcuda",
     ],
 )
