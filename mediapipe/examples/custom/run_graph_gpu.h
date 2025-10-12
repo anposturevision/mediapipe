@@ -19,6 +19,7 @@ class GraphRunner {
         virtual ~GraphRunner() = default;
         virtual bool initGraph(const std::string& calculator_graph_config_file) = 0;
         virtual bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) = 0;
+        virtual void cleanup() = 0;  // Add explicit cleanup method
 };
 
 class HandTrackingGraphRunner : public GraphRunner {
@@ -28,6 +29,7 @@ class HandTrackingGraphRunner : public GraphRunner {
 
         bool initGraph(const std::string& calculator_graph_config_file);
         bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        void cleanup() override;  // Explicit cleanup method
 
     private:
         void* runnerVoid = nullptr;
@@ -40,6 +42,7 @@ class FacemeshGraphRunner : public GraphRunner {
 
         bool initGraph(const std::string& calculator_graph_config_file);
         bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        void cleanup() override;  // Explicit cleanup method
 
     private:
         void* runnerVoid = nullptr;

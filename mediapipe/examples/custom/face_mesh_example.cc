@@ -10,7 +10,7 @@
 int main() {
     try {
         FacemeshGraphRunner face_mesh;
-        std::string graph_config = "/build/mediapipe/mediapipe/graphs/face_mesh/face_mesh_gpu_lib.pbtxt";
+        std::string graph_config = "/mediapipe/mediapipe/graphs/face_mesh/face_mesh_gpu_lib.pbtxt";
         
         std::cout << "Initializing face mesh graph..." << std::endl;
         if (!face_mesh.initGraph(graph_config)) {
@@ -19,7 +19,7 @@ int main() {
         }
         std::cout << "Face mesh graph initialized successfully." << std::endl;
 
-        cv::Mat camera_frame = cv::imread("/build/mediapipe/mediapipe/examples/custom/far_face.jpg");
+        cv::Mat camera_frame = cv::imread("/mediapipe/mediapipe/examples/custom/far_face.jpg");
         if (camera_frame.empty()) {
             std::cerr << "Failed to read the image file." << std::endl;
             return -1;
@@ -42,7 +42,7 @@ int main() {
         // Warmup runs
         for (int i = 0; i < warmup_iterations; i++) {
             std::vector<LandmarkList> landmarks;
-            if (!face_mesh.ProcessFrame(camera_frame, current_timestamp_us, landmarks)) {
+            if (!face_mesh.processFrame(camera_frame, current_timestamp_us, landmarks)) {
                 std::cerr << "Failed to process frame during warmup iteration " << i << std::endl;
                 return -1;
             }
@@ -59,7 +59,7 @@ int main() {
             
             auto start_time = std::chrono::high_resolution_clock::now();
             
-            if (!face_mesh.ProcessFrame(camera_frame, current_timestamp_us, landmarks)) {
+            if (!face_mesh.processFrame(camera_frame, current_timestamp_us, landmarks)) {
                 std::cerr << "Failed to process frame during iteration " << i << std::endl;
                 return -1;
             }
@@ -112,7 +112,7 @@ int main() {
         std::vector<LandmarkList> final_landmarks;
         
         std::cout << "\n=== Final Frame Results ===" << std::endl;
-        if (!face_mesh.ProcessFrame(camera_frame, current_timestamp_us, final_landmarks)) {
+        if (!face_mesh.processFrame(camera_frame, current_timestamp_us, final_landmarks)) {
             std::cerr << "Failed to process final verification frame." << std::endl;
             return -1;
         }

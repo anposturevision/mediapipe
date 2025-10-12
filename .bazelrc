@@ -16,6 +16,8 @@ build:linux --cxxopt=-std=c++17
 build:linux --host_cxxopt=-std=c++17
 build:linux --copt=-w
 build:linux --define=xnn_enable_avx512amx=false
+build:linux --define=xnn_enable_avxvnni=false
+build:linux --define=xnn_enable_avxvnniint8=false
 
 # windows
 build:windows --cxxopt=/std:c++17

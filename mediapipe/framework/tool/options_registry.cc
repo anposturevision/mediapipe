@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "mediapipe/framework/deps/no_destructor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "mediapipe/framework/port/ret_check.h"
 #include "mediapipe/framework/tool/proto_util_lite.h"
@@ -105,15 +107,31 @@ void RegisterDescriptorProtos(
 
 RegistrationToken OptionsRegistry::Register(
     const FieldData& file_descriptor_set) {
+  std::vector<std::string> registered_types;
   auto files = GetFieldValues(file_descriptor_set, "file");
   for (auto& file : *files) {
     std::string package_name = GetFieldString(file, "package");
     auto message_types = GetFieldValues(file, "message_type");
     for (auto& message_type : *message_types) {
+      std::string name = GetFieldString(message_type, "name");
+      std::string full_name = absl::StrCat(package_name, ".", name);
+      registered_types.push_back(full_name);
       Register(message_type, package_name);
     }
   }
-  return RegistrationToken([]() {});
+  
+  // Return a token that can clean up the registered descriptors
+  return RegistrationToken([registered_types]() {
+    absl::MutexLock lock(&mutex());
+    for (const std::string& type_name : registered_types) {
+      descriptors().erase(type_name);
+      // Also clean up any extensions that were registered
+      auto it = extensions().find(type_name);
+      if (it != extensions().end()) {
+        extensions().erase(it);
+      }
+    }
+  });
 }
 
 void OptionsRegistry::Register(const FieldData& message_type,
@@ -162,19 +180,24 @@ void OptionsRegistry::FindAllExtensions(
 }
 
 absl::flat_hash_map<std::string, Descriptor>& OptionsRegistry::descriptors() {
-  static auto* descriptors = new absl::flat_hash_map<std::string, Descriptor>();
+  // Use LeakySingleton to prevent memory leak warnings - these are intentionally
+  // never cleaned up as they may be accessed during static destruction
+  static NoDestructor<absl::flat_hash_map<std::string, Descriptor>> descriptors;
   return *descriptors;
 }
 
 absl::flat_hash_map<std::string, std::vector<FieldDescriptor>>&
 OptionsRegistry::extensions() {
-  static auto* extensions =
-      new absl::flat_hash_map<std::string, std::vector<FieldDescriptor>>();
+  // Use LeakySingleton to prevent memory leak warnings - these are intentionally
+  // never cleaned up as they may be accessed during static destruction
+  static NoDestructor<absl::flat_hash_map<std::string, std::vector<FieldDescriptor>>> extensions;
   return *extensions;
 }
 
 absl::Mutex& OptionsRegistry::mutex() {
-  static auto* mutex = new absl::Mutex();
+  // Use LeakySingleton to prevent memory leak warnings - this is intentionally
+  // never cleaned up as it may be accessed during static destruction
+  static NoDestructor<absl::Mutex> mutex;
   return *mutex;
 }
 

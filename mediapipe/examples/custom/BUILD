@@ -35,7 +35,11 @@ cc_library(
         "//mediapipe/gpu:gpu_shared_data_internal",
         "//mediapipe/util:resource_util",
         "@com_google_absl//absl/log:absl_log",
-        "//mediapipe/framework/formats:landmark_cc_proto"
+        "//mediapipe/framework/formats:landmark_cc_proto",
+        "//mediapipe/framework/deps:no_destructor",
+        "//mediapipe/framework/deps:model_lifecycle_manager",
+        "//mediapipe/framework/deps:scoped_model_resources",
+        "//mediapipe/framework/deps:scoped_options_registry",
     ],
     alwayslink = 1,
 )

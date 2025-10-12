@@ -274,6 +274,7 @@ cc_library(
         "//buzz/diffractor/mediapipe:__pkg__",
     ],
     deps = [
+        ":no_destructor",
         ":registration_token",
         "//mediapipe/framework/port:status",
         "//mediapipe/framework/port:statusor",
@@ -283,6 +284,111 @@ cc_library(
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/meta:type_traits",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+# Memory lifecycle management libraries
+cc_library(
+    name = "model_lifecycle_manager",
+    srcs = ["model_lifecycle_manager.cc"],
+    hdrs = ["model_lifecycle_manager.h"],
+    visibility = [
+        "mediapipe_internal",
+    ],
+    deps = [
+        ":registration_token",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_library(
+    name = "reference_counted_registry",
+    hdrs = ["reference_counted_registry.h"],
+    visibility = [
+        "mediapipe_internal",
+    ],
+    deps = [
+        ":model_lifecycle_manager",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "scoped_model_resources",
+    srcs = ["scoped_model_resources.cc"],
+    hdrs = ["scoped_model_resources.h"],
+    visibility = [
+        "mediapipe_internal",
+    ],
+    deps = [
+        ":model_lifecycle_manager",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "scoped_options_registry",
+    srcs = ["scoped_options_registry.cc"],
+    hdrs = ["scoped_options_registry.h"],
+    visibility = [
+        "mediapipe_internal",
+    ],
+    deps = [
+        ":model_lifecycle_manager",
+        ":reference_counted_registry",
+        "//mediapipe/framework/port:core_proto",
+        "//mediapipe/framework/tool:field_data_cc_proto",
+        "//mediapipe/framework/tool:options_registry",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "global_cleanup",
+    srcs = ["global_cleanup.cc"],
+    hdrs = ["global_cleanup.h"],
+    visibility = [
+        "mediapipe_internal",
+    ],
+    deps = [
+        ":model_lifecycle_manager",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_test(
+    name = "memory_leak_test",
+    srcs = ["memory_leak_test.cc"],
+    deps = [
+        ":model_lifecycle_manager",
+        ":reference_counted_registry", 
+        ":scoped_model_resources",
+        ":scoped_options_registry",
+        ":global_cleanup",
+        ":registration",
+        "//mediapipe/framework/port:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
     ],

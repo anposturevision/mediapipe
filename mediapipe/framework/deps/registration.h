@@ -30,11 +30,13 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/absl_check.h"
 #include "absl/log/absl_log.h"
+#include "absl/memory/memory.h"
 #include "absl/meta/type_traits.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
+#include "mediapipe/framework/deps/no_destructor.h"
 #include "mediapipe/framework/deps/registration_token.h"
 #include "mediapipe/framework/port/canonical_errors.h"
 #include "mediapipe/framework/port/statusor.h"
@@ -195,6 +197,38 @@ class FunctionRegistry {
     ABSL_LOG(FATAL) << "Function with name " << name << " already registered.";
     return RegistrationToken([]() {});
   }
+  
+  // Enhanced registration with reference counting for memory leak prevention
+  RegistrationToken RegisterWithRefCounting(absl::string_view name, Function func)
+      ABSL_LOCKS_EXCLUDED(lock_) {
+    std::string normalized_name = GetNormalizedName(name);
+    absl::WriterMutexLock lock(&lock_);
+    
+    // Check if already registered and increment ref count
+    auto ref_it = function_ref_counts_.find(normalized_name);
+    if (ref_it != function_ref_counts_.end()) {
+      ref_it->second++;
+      return RegistrationToken([this, normalized_name]() { 
+        DecrementRefCount(normalized_name); 
+      });
+    }
+    
+    // First registration - add function and set ref count to 1
+    std::string adjusted_name = GetAdjustedName(normalized_name);
+    if (adjusted_name != normalized_name) {
+      functions_.insert(std::make_pair(adjusted_name, func));
+    }
+    
+    if (functions_.insert(std::make_pair(normalized_name, std::move(func))).second) {
+      function_ref_counts_[normalized_name] = 1;
+      return RegistrationToken([this, normalized_name]() { 
+        DecrementRefCount(normalized_name); 
+      });
+    }
+    
+    ABSL_LOG(FATAL) << "Function with name " << name << " already registered.";
+    return RegistrationToken([]() {});
+  }
 
   // Force 'args' to be deduced by templating the function, instead of just
   // accepting Args. This is necessary to make 'args' a forwarding reference as
@@ -321,6 +355,7 @@ class FunctionRegistry {
  private:
   mutable absl::Mutex lock_;
   absl::flat_hash_map<std::string, Function> functions_ ABSL_GUARDED_BY(lock_);
+  absl::flat_hash_map<std::string, int> function_ref_counts_ ABSL_GUARDED_BY(lock_);
 
   // For names included in NamespaceAllowlist, strips the namespace.
   std::string GetAdjustedName(absl::string_view name) {
@@ -342,6 +377,24 @@ class FunctionRegistry {
       functions_.erase(adjusted_name);
     }
     functions_.erase(name);
+  }
+  
+  // Decrement reference count and remove if it reaches zero
+  void DecrementRefCount(absl::string_view name) {
+    absl::WriterMutexLock lock(&lock_);
+    auto ref_it = function_ref_counts_.find(name);
+    if (ref_it != function_ref_counts_.end()) {
+      ref_it->second--;
+      if (ref_it->second <= 0) {
+        // Remove the function when ref count reaches zero
+        std::string adjusted_name = GetAdjustedName(name);
+        if (adjusted_name != name) {
+          functions_.erase(adjusted_name);
+        }
+        functions_.erase(name);
+        function_ref_counts_.erase(ref_it);
+      }
+    }
   }
 };
 
@@ -395,8 +448,9 @@ class GlobalFactoryRegistry {
 
   // Returns the factory function registry singleton.
   static Functions* functions() {
-    static auto* functions = new Functions();
-    return functions;
+    // Use NoDestructor to prevent memory leak warnings during static destruction
+    static NoDestructor<Functions> functions;
+    return functions.get();
   }
 
  private:
@@ -513,9 +567,8 @@ static_assert(false,
 
 #define MEDIAPIPE_REGISTER_FACTORY_FUNCTION_QUALIFIED(RegistryType, var_name, \
                                                       name, ...)              \
-  static mediapipe::RegistrationToken* REGISTRY_STATIC_VAR(var_name,          \
-                                                           __LINE__) =        \
-      new mediapipe::RegistrationToken(                                       \
+  static NoDestructor<mediapipe::RegistrationToken> REGISTRY_STATIC_VAR(var_name, \
+                                                           __LINE__)( \
           RegistryType::Register(name, __VA_ARGS__));
 
 // Defines a utility registrator class which can be used to automatically

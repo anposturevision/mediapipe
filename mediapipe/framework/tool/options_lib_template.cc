@@ -17,6 +17,7 @@
 
 #include "mediapipe/framework/port/advanced_proto_inc.h"
 #include "mediapipe/framework/tool/options_registry.h"
+#include "mediapipe/framework/deps/registration_token.h"
 #include "{{MESSAGE_NAME_HEADER}}"
 #include "{{MESSAGE_PROTO_HEADER}}"
 
@@ -41,6 +42,7 @@ mediapipe::FieldData ReadFileDescriptorSet(const std::string& pb) {
 
 namespace mediapipe {
 // The protobuf descriptor for an options message type.
+// Use NoDestructor to prevent memory leaks during static initialization/destruction.
 template <>
 const RegistrationToken tool::OptionsRegistry::registration_token<
     MP_OPTION_TYPE_NS::MP_OPTION_TYPE_NAME> =

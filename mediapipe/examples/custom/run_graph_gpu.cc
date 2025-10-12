@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <chrono>
 #include <thread>
+#include <memory>
 #include "absl/log/absl_log.h"
 #include "mediapipe/framework/calculator_framework.h"
 #include "mediapipe/framework/deps/status_macros.h"
@@ -20,6 +21,17 @@
 #include "mediapipe/gpu/gpu_service.h"
 #include "mediapipe/util/resource_util.h"
 
+// Include the new lifecycle management headers
+#include "mediapipe/framework/deps/model_lifecycle_manager.h"
+#include "mediapipe/framework/deps/scoped_model_resources.h"
+#include "mediapipe/framework/deps/scoped_options_registry.h"
+
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#else
+#include <GL/gl.h>
+#endif
+
 // const char kLandmarksOutputStream[] = "hand_landmarks";
 // const char kHandednessOutputStream[] = "handedness";
 const char kInputStream[] = "input_video";
@@ -27,6 +39,21 @@ const char kInputStream[] = "input_video";
 class MPPGraphRunner {
     public:
         MPPGraphRunner(std::string task) : task_(task) {
+            // Create a unique model ID for this instance
+            model_id_ = task + "_" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+            
+            // Initialize lifecycle management
+            lifecycle_manager_ = std::make_unique<mediapipe::ScopedModelManager>(model_id_);
+            
+            // Create scoped resource managers
+            resource_cache_ = mediapipe::CreateScopedModelResourcesCache(model_id_);
+            options_registry_ = mediapipe::CreateScopedOptionsRegistry(model_id_);
+            
+            // Register with lifecycle manager
+            resource_cache_->RegisterWithLifecycleManager(lifecycle_manager_->operator->());
+            options_registry_->RegisterWithLifecycleManager(lifecycle_manager_->operator->());
+            
             if (task_ == "hand_landmarks") {
                 kOutputStream_ = "hand_landmarks";
             } else if (task_ == "face_mesh") {
@@ -37,17 +64,44 @@ class MPPGraphRunner {
         }
 
         ~MPPGraphRunner() {
-            // Clean up the graph
+            // Proper cleanup sequence to prevent memory leaks
+            ABSL_LOG(INFO) << "Destroying MPPGraphRunner for model: " << model_id_;
+            
+            // 1. Close input stream first
             if (graph_.HasInputStream(kInputStream)) {
                 auto status = graph_.CloseInputStream(kInputStream);
                 if (!status.ok()) {
                     ABSL_LOG(ERROR) << "Failed to close input stream: " << status.message();
                 }
             }
+            
+            // 2. Reset poller before shutting down graph
+            poller_landmarks_.reset();
+            
+            // 3. Wait for graph to finish processing and then shut it down
             auto status = graph_.WaitUntilDone();
             if (!status.ok()) {
                 ABSL_LOG(ERROR) << "Graph did not finish properly: " << status.message();
             }
+            
+            // 4. Explicitly clean up GPU resources in the correct context
+            if (gpu_helper_.Initialized()) {
+                gpu_helper_.RunInGlContext([this]() -> absl::Status {
+                    // Force cleanup of any remaining GPU resources
+                    glFinish(); // Wait for all GPU operations to complete
+                    return absl::OkStatus();
+                });
+            }
+            
+            // 5. Clean up lifecycle-managed resources
+            // This will automatically clean up all registered resources, caches, and registrations
+            lifecycle_manager_.reset();  // This triggers all cleanup functions
+            resource_cache_.reset();
+            options_registry_.reset();
+            
+            ABSL_LOG(INFO) << "MPPGraphRunner cleanup completed for model: " << model_id_;
+            
+            // 6. The graph destructor will handle the rest of the cleanup
         }
 
         absl::Status InitMPPGraph(std::string calculator_graph_config_file) {
@@ -91,15 +145,20 @@ class MPPGraphRunner {
 
             MP_RETURN_IF_ERROR(
                 gpu_helper_.RunInGlContext([this, &input_frame, &frame_timestamp_us]() -> absl::Status {
-                    // Convert ImageFrame to GpuBuffer.
+                    // Convert ImageFrame to GpuBuffer - using the efficient MediaPipe pattern
                     auto texture = gpu_helper_.CreateSourceTexture(*input_frame.get());
                     auto gpu_frame = texture.GetFrame<mediapipe::GpuBuffer>();
-                    glFlush();
-                    texture.Release();
+                    
                     // Send GPU image packet into the graph.
                     MP_RETURN_IF_ERROR(graph_.AddPacketToInputStream(
                         kInputStream, mediapipe::Adopt(gpu_frame.release())
                                         .At(mediapipe::Timestamp(frame_timestamp_us))));
+                    
+                    // Release texture after packet is sent - this was the key fix
+                    texture.Release();
+                    // Force GPU to complete operations before returning
+                    glFlush();
+                    glFinish(); // Wait for GPU operations to complete
                     return absl::OkStatus();
                 })
             );
@@ -124,7 +183,42 @@ class MPPGraphRunner {
                 landmarks.clear();
             }
 
+            // Force cleanup of any temporary GPU resources after processing
+            if (gpu_helper_.Initialized()) {
+                gpu_helper_.RunInGlContext([]() -> absl::Status {
+                    glFlush();
+                    return absl::OkStatus();
+                });
+            }
+
             return absl::OkStatus();
+        }
+
+        // Add explicit cleanup method
+        void cleanup() {
+            // Close input stream
+            if (graph_.HasInputStream(kInputStream)) {
+                auto status = graph_.CloseInputStream(kInputStream);
+                if (!status.ok()) {
+                    ABSL_LOG(ERROR) << "Failed to close input stream during cleanup: " << status.message();
+                }
+            }
+            
+            // Reset poller
+            poller_landmarks_.reset();
+            
+            // Wait for completion and clean up GPU context
+            auto status = graph_.WaitUntilDone();
+            if (!status.ok()) {
+                ABSL_LOG(ERROR) << "Graph cleanup error: " << status.message();
+            }
+            
+            if (gpu_helper_.Initialized()) {
+                gpu_helper_.RunInGlContext([]() -> absl::Status {
+                    glFinish();
+                    return absl::OkStatus();
+                });
+            }
         }
 
     private:
@@ -134,11 +228,20 @@ class MPPGraphRunner {
         std::string task_;
         std::string kOutputStream_ = "";
         std::unique_ptr<mediapipe::OutputStreamPoller> poller_landmarks_;
+        
+        // Lifecycle management members
+        std::string model_id_;
+        std::unique_ptr<mediapipe::ScopedModelManager> lifecycle_manager_;
+        std::unique_ptr<mediapipe::ScopedModelResourcesCache> resource_cache_;
+        std::unique_ptr<mediapipe::ScopedOptionsRegistry> options_registry_;
 };
 
 HandTrackingGraphRunner::~HandTrackingGraphRunner() {
-    if (runnerVoid) {
-        delete static_cast<MPPGraphRunner*>(runnerVoid);
+    if (runnerVoid != nullptr) {
+        MPPGraphRunner* runner = static_cast<MPPGraphRunner*>(runnerVoid);
+        // Explicit cleanup before destruction
+        runner->cleanup();
+        delete runner;
         runnerVoid = nullptr;
     }
 }
@@ -182,9 +285,18 @@ bool HandTrackingGraphRunner::processFrame(const cv::Mat &camera_frame, size_t f
 	return status.ok();
 }
 
+void HandTrackingGraphRunner::cleanup() {
+    if (runnerVoid != nullptr) {
+        static_cast<MPPGraphRunner*>(runnerVoid)->cleanup();
+    }
+}
+
 FacemeshGraphRunner::~FacemeshGraphRunner() {
-    if (runnerVoid) {
-        delete static_cast<MPPGraphRunner*>(runnerVoid);
+    if (runnerVoid != nullptr) {
+        MPPGraphRunner* runner = static_cast<MPPGraphRunner*>(runnerVoid);
+        // Explicit cleanup before destruction
+        runner->cleanup();
+        delete runner;
         runnerVoid = nullptr;
     }
 }
@@ -226,4 +338,10 @@ bool FacemeshGraphRunner::processFrame(const cv::Mat &camera_frame, size_t frame
     }
 
     return status.ok();
+}
+
+void FacemeshGraphRunner::cleanup() {
+    if (runnerVoid != nullptr) {
+        static_cast<MPPGraphRunner*>(runnerVoid)->cleanup();
+    }
 }
