@@ -1,11 +1,10 @@
-#ifndef RUN_GRAPH_GPU_H
-#define RUN_GRAPH_GPU_H
+#ifndef RUN_GRAPH_CPU_ONLY_H
+#define RUN_GRAPH_CPU_ONLY_H
 
 #include <cstdlib>
 #include <string>
 #include <vector>
 #include <opencv2/core.hpp>
-#include <opencv2/core/cuda.hpp>
 
 // Forward declaration
 class MPPGraphRunner;
@@ -19,7 +18,7 @@ class GraphRunner {
     public:
         virtual ~GraphRunner() = default;
         virtual bool initGraph(const std::string& calculator_graph_config_file) = 0;
-        virtual bool processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) = 0;
+        virtual bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks) = 0;
         virtual void cleanup() = 0;  // Add explicit cleanup method
         virtual bool resetTracking() = 0;  // Add reset tracking method
 };
@@ -30,7 +29,7 @@ class HandTrackingGraphRunner : public GraphRunner {
         ~HandTrackingGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
-        bool processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
         void cleanup() override;  // Explicit cleanup method
         bool resetTracking() override;  // Reset tracking method
 
@@ -44,7 +43,7 @@ class FacemeshGraphRunner : public GraphRunner {
         ~FacemeshGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
-        bool processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
         void cleanup() override;
         bool resetTracking() override;
 
@@ -58,7 +57,7 @@ class PoseGraphRunner : public GraphRunner {
         ~PoseGraphRunner();
 
         bool initGraph(const std::string& calculator_graph_config_file);
-        bool processFrame(const cv::cuda::GpuMat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
+        bool processFrame(const cv::Mat &camera_frame, size_t frame_timestamp_us, std::vector<LandmarkList> &landmarks);
         void cleanup() override;
         bool resetTracking() override;
 
@@ -66,5 +65,4 @@ class PoseGraphRunner : public GraphRunner {
         void* runnerVoid = nullptr;
 };
 
-#endif // RUN_GRAPH_GPU_H
-
+#endif // RUN_GRAPH_CPU_ONLY_H

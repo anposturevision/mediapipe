@@ -107,3 +107,92 @@ cc_binary(
         "-lcuda",
     ],
 )
+
+# CPU-only library (no GPU/CUDA dependencies)
+cc_library(
+    name = "run_graph_cpu_only_lib",
+    srcs = ["run_graph_cpu_only.cc"],
+    hdrs = ["run_graph_cpu_only.h"],
+    deps = [
+        "//mediapipe/framework:calculator_framework",
+        "//mediapipe/framework/formats:image_frame",
+        "//mediapipe/framework/formats:image_frame_opencv",
+        "//mediapipe/framework/port:file_helpers",
+        "//mediapipe/framework/port:opencv_imgproc",
+        "//mediapipe/framework/port:parse_text_proto",
+        "//mediapipe/framework/port:status",
+        "//mediapipe/framework/formats:landmark_cc_proto",
+        "//mediapipe/framework/deps:model_lifecycle_manager",
+        "//mediapipe/framework/deps:scoped_model_resources",
+        "//mediapipe/framework/deps:scoped_options_registry",
+        "//mediapipe/util:resource_util",
+        "@com_google_absl//absl/log:absl_log",
+    ],
+    alwayslink = 1,
+)
+
+# Shared library for CPU-only usage
+cc_binary(
+    name = "librun_graph_cpu_only.so",
+    linkshared = 1,
+    deps = [
+        ":run_graph_cpu_only_lib",
+        "//mediapipe/graphs/hand_tracking:desktop_tflite_calculators",
+        "//mediapipe/graphs/face_mesh:desktop_live_calculators",
+    ],
+)
+
+# Hand tracking CPU example
+cc_binary(
+    name = "hand_landmark_cpu_example",
+    srcs = ["hand_landmark_cpu_example.cc"],
+    data = [
+        "//mediapipe/graphs/hand_tracking:hand_tracking_desktop_live.pbtxt",
+        "//mediapipe/modules/hand_landmark:hand_landmark_full.tflite",
+        "//mediapipe/modules/palm_detection:palm_detection_full.tflite",
+    ],
+    deps = [
+        ":run_graph_cpu_only_lib",
+        "//mediapipe/graphs/hand_tracking:desktop_tflite_calculators",
+        "//mediapipe/framework/port:opencv_highgui",
+        "//mediapipe/framework/port:opencv_imgproc",
+        "@com_google_absl//absl/log:absl_log",
+    ],
+)
+
+# Face mesh CPU example
+cc_binary(
+    name = "face_mesh_cpu_example",
+    srcs = ["face_mesh_cpu_example.cc"],
+    data = [
+        "//mediapipe/graphs/face_mesh:face_mesh_desktop_live.pbtxt",
+        "//mediapipe/modules/face_landmark:face_landmark_with_attention.tflite",
+        "//mediapipe/modules/face_detection:face_detection_short_range.tflite",
+        "//mediapipe/modules/face_detection:face_detection_full_range.tflite",
+    ],
+    deps = [
+        ":run_graph_cpu_only_lib",
+        "//mediapipe/graphs/face_mesh:desktop_live_calculators",
+        "//mediapipe/framework/port:opencv_highgui",
+        "//mediapipe/framework/port:opencv_imgproc",
+        "@com_google_absl//absl/log:absl_log",
+    ],
+)
+
+# Pose CPU example
+cc_binary(
+    name = "pose_cpu_example",
+    srcs = ["pose_cpu_example.cc"],
+    data = [
+        "//mediapipe/graphs/pose_tracking:pose_tracking_cpu.pbtxt",
+        "//mediapipe/modules/pose_landmark:pose_landmark_full.tflite",
+        "//mediapipe/modules/pose_detection:pose_detection.tflite",
+    ],
+    deps = [
+        ":run_graph_cpu_only_lib",
+        "//mediapipe/graphs/pose_tracking:pose_tracking_cpu_deps",
+        "//mediapipe/framework/port:opencv_highgui",
+        "//mediapipe/framework/port:opencv_imgproc",
+        "@com_google_absl//absl/log:absl_log",
+    ],
+)

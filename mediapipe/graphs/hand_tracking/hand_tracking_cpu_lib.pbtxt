@@ -1,8 +1,6 @@
-# MediaPipe graph that performs multi-hand tracking with TensorFlow Lite on GPU.
-# Used in the examples in
-# mediapipe/examples/android/src/java/com/mediapipe/apps/handtrackinggpu.
+# MediaPipe graph that performs multi-hand tracking with TensorFlow Lite on CPU.
 
-# GPU image. (GpuBuffer)
+# CPU image. (ImageFrame)
 input_stream: "input_video"
 
 # Collection of detected/predicted hands, each represented as a list of
@@ -22,7 +20,7 @@ node {
 
 # Detects/tracks hand landmarks.
 node {
-  calculator: "HandLandmarkTrackingGpu"
+  calculator: "HandLandmarkTrackingCpu"
   input_stream: "IMAGE:input_video"
   input_side_packet: "NUM_HANDS:num_hands"
   output_stream: "LANDMARKS:hand_landmarks"
