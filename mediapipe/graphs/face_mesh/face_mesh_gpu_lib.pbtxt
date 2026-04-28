@@ -7,6 +7,10 @@ input_stream: "input_video"
 # landmarks. (std::vector<NormalizedLandmarkList>)
 output_stream: "multi_face_landmarks"
 
+# Per-face 4x4 pose transform from the face_geometry pipeline.
+# (std::vector<face_geometry::FaceGeometry>)
+output_stream: "multi_face_geometry"
+
 # Throttles the images flowing downstream for flow control. It passes through
 # the very first incoming image unaltered, and waits for downstream nodes
 # (calculators and subgraphs) in the graph to finish their tasks before it
@@ -51,4 +55,49 @@ node {
   output_stream: "ROIS_FROM_LANDMARKS:face_rects_from_landmarks"
   output_stream: "DETECTIONS:face_detections"
   output_stream: "ROIS_FROM_DETECTIONS:face_rects_from_detections"
+}
+
+# Extracts the input frame size for the face_geometry pipeline.
+node {
+  calculator: "ImagePropertiesCalculator"
+  input_stream: "IMAGE_GPU:throttled_input_video"
+  output_stream: "SIZE:image_size"
+}
+
+# Provides the Environment side packet that defines the virtual perspective
+# camera used by face_geometry. Defaults match MediaPipe's canonical face_effect
+# graph: 63° vertical FOV, 1cm near / 100m far clip planes.
+node {
+  calculator: "FaceGeometryEnvGeneratorCalculator"
+  output_side_packet: "ENVIRONMENT:environment"
+  node_options: {
+    [type.googleapis.com/mediapipe.FaceGeometryEnvGeneratorCalculatorOptions] {
+      environment: {
+        origin_point_location: TOP_LEFT_CORNER
+        perspective_camera: {
+          vertical_fov_degrees: 63.0
+          near: 1.0
+          far: 10000.0
+        }
+      }
+    }
+  }
+}
+
+# Computes the 4x4 face pose transform matrix from the landmarks + image size.
+# Inlined instead of using the FaceGeometryFromLandmarks subgraph so we can
+# point at the iris-aware metadata (478 landmarks, matching `with_attention=true`
+# above). The default subgraph hardcodes the 468-landmark metadata which
+# fails with a "landmark count mismatch" RET_CHECK.
+node {
+  calculator: "FaceGeometryPipelineCalculator"
+  input_side_packet: "ENVIRONMENT:environment"
+  input_stream: "IMAGE_SIZE:image_size"
+  input_stream: "MULTI_FACE_LANDMARKS:multi_face_landmarks"
+  output_stream: "MULTI_FACE_GEOMETRY:multi_face_geometry"
+  node_options: {
+    [type.googleapis.com/mediapipe.FaceGeometryPipelineCalculatorOptions] {
+      metadata_path: "mediapipe/modules/face_geometry/data/geometry_pipeline_metadata_including_iris_landmarks.binarypb"
+    }
+  }
 }
