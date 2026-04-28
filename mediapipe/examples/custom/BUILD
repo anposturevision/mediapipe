@@ -26,6 +26,7 @@ cc_library(
         "//mediapipe/framework:calculator_framework",
         "//mediapipe/framework/formats:image_frame",
         "//mediapipe/framework/formats:image_frame_opencv",
+        "//mediapipe/framework/formats:matrix_data_cc_proto",
         "//mediapipe/framework/port:file_helpers",
         "//mediapipe/framework/port:opencv_imgproc",
         "//mediapipe/framework/port:parse_text_proto",
@@ -33,6 +34,7 @@ cc_library(
         "//mediapipe/gpu:gl_calculator_helper",
         "//mediapipe/gpu:gpu_buffer",
         "//mediapipe/gpu:gpu_shared_data_internal",
+        "//mediapipe/modules/face_geometry/protos:face_geometry_cc_proto",
         "//mediapipe/util:resource_util",
         "@com_google_absl//absl/log:absl_log",
         "//mediapipe/framework/formats:landmark_cc_proto",
@@ -52,6 +54,14 @@ cc_binary(
         ":run_graph_gpu_lib",
         "//mediapipe/graphs/hand_tracking:mobile_calculators",
         "//mediapipe/graphs/face_mesh:mobile_calculators",
+        "//mediapipe/graphs/pose_tracking:pose_tracking_gpu_deps",
+        # face_geometry: provides FaceGeometryPipelineCalculator (inlined directly
+        # in face_mesh_gpu_lib.pbtxt instead of via FaceGeometryFromLandmarks
+        # subgraph, so we can pass the iris-aware metadata path) +
+        # FaceGeometryEnvGeneratorCalculator + ImagePropertiesCalculator.
+        "//mediapipe/modules/face_geometry:geometry_pipeline_calculator",
+        "//mediapipe/modules/face_geometry:env_generator_calculator",
+        "//mediapipe/calculators/image:image_properties_calculator",
     ],
 )
 
@@ -82,10 +92,38 @@ cc_binary(
         "//mediapipe/modules/face_landmark:face_landmark_with_attention.tflite",
         "//mediapipe/modules/face_detection:face_detection_short_range.tflite",
         "//mediapipe/modules/face_detection:face_detection_full_range.tflite",
+        # Canonical face model metadata for the face_geometry pipeline.
+        # Iris-aware variant matches the 478 landmarks emitted by
+        # FaceLandmarkFrontGpu when with_attention=true.
+        "//mediapipe/modules/face_geometry/data:geometry_pipeline_metadata_including_iris_landmarks",
     ],
     deps = [
         ":run_graph_gpu_lib",
         "//mediapipe/graphs/face_mesh:mobile_calculators",
+        "//mediapipe/framework/port:opencv_highgui",
+        "//mediapipe/framework/port:opencv_imgproc",
+        "@com_google_absl//absl/log:absl_log",
+        # face_geometry deps for the inlined FaceGeometryPipelineCalculator +
+        # FaceGeometryEnvGeneratorCalculator + ImagePropertiesCalculator nodes
+        # added in the modified face_mesh_gpu_lib.pbtxt.
+        "//mediapipe/modules/face_geometry:geometry_pipeline_calculator",
+        "//mediapipe/modules/face_geometry:env_generator_calculator",
+        "//mediapipe/calculators/image:image_properties_calculator",
+    ],
+)
+
+# Pose GPU example
+cc_binary(
+    name = "pose_example",
+    srcs = ["pose_example.cc"],
+    data = [
+        "//mediapipe/graphs/pose_tracking:pose_tracking_gpu.pbtxt",
+        "//mediapipe/modules/pose_landmark:pose_landmark_full.tflite",
+        "//mediapipe/modules/pose_detection:pose_detection.tflite",
+    ],
+    deps = [
+        ":run_graph_gpu_lib",
+        "//mediapipe/graphs/pose_tracking:pose_tracking_gpu_deps",
         "//mediapipe/framework/port:opencv_highgui",
         "//mediapipe/framework/port:opencv_imgproc",
         "@com_google_absl//absl/log:absl_log",
