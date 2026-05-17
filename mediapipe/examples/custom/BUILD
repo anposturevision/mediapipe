@@ -65,6 +65,38 @@ cc_binary(
     ],
 )
 
+# Windows bridge DLL consumed by the Electron sidecar. It exports:
+#   mp_facemesh_init
+#   mp_facemesh_process_frame_full  (landmarks + face transform matrix; no legacy export)
+#   mp_facemesh_cleanup
+cc_binary(
+    name = "mp_facemesh.dll",
+    srcs = ["mp_facemesh.cc"],
+    data = [
+        ":face_mesh_cpu_lib.pbtxt",
+        "//mediapipe/modules/face_landmark:face_landmark_with_attention.tflite",
+        "//mediapipe/modules/face_detection:face_detection_short_range.tflite",
+        "//mediapipe/modules/face_geometry/data:geometry_pipeline_metadata_including_iris_landmarks",
+    ],
+    linkshared = 1,
+    deps = [
+        "//mediapipe/calculators/core:constant_side_packet_calculator",
+        "//mediapipe/calculators/image:image_properties_calculator",
+        "//mediapipe/framework:calculator_framework",
+        "//mediapipe/framework/formats:image_frame",
+        "//mediapipe/framework/formats:image_frame_opencv",
+        "//mediapipe/framework/formats:landmark_cc_proto",
+        "//mediapipe/framework/formats:matrix_data_cc_proto",
+        "//mediapipe/framework/port:file_helpers",
+        "//mediapipe/framework/port:opencv_imgproc",
+        "//mediapipe/framework/port:parse_text_proto",
+        "//mediapipe/modules/face_landmark:face_landmark_front_cpu",
+        "//mediapipe/modules/face_geometry:geometry_pipeline_calculator",
+        "//mediapipe/modules/face_geometry:env_generator_calculator",
+        "//mediapipe/modules/face_geometry/protos:face_geometry_cc_proto",
+    ],
+)
+
 # Example binary that uses the hand tracking library
 cc_binary(
     name = "hand_landmark_example",

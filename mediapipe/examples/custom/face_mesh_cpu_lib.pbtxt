@@ -1,0 +1,66 @@
+# MediaPipe graph that performs FaceMesh with TensorFlow Lite on CPU and emits
+# both landmarks and face_geometry pose matrices.
+
+input_stream: "input_video"
+
+output_stream: "multi_face_landmarks"
+output_stream: "multi_face_geometry"
+
+node {
+  calculator: "ConstantSidePacketCalculator"
+  output_side_packet: "PACKET:0:num_faces"
+  output_side_packet: "PACKET:1:with_attention"
+  node_options: {
+    [type.googleapis.com/mediapipe.ConstantSidePacketCalculatorOptions]: {
+      packet { int_value: 1 }
+      packet { bool_value: true }
+    }
+  }
+}
+
+node {
+  calculator: "FaceLandmarkFrontCpu"
+  input_stream: "IMAGE:input_video"
+  input_side_packet: "NUM_FACES:num_faces"
+  input_side_packet: "WITH_ATTENTION:with_attention"
+  output_stream: "LANDMARKS:multi_face_landmarks"
+  output_stream: "ROIS_FROM_LANDMARKS:face_rects_from_landmarks"
+  output_stream: "DETECTIONS:face_detections"
+  output_stream: "ROIS_FROM_DETECTIONS:face_rects_from_detections"
+}
+
+node {
+  calculator: "ImagePropertiesCalculator"
+  input_stream: "IMAGE:input_video"
+  output_stream: "SIZE:image_size"
+}
+
+node {
+  calculator: "FaceGeometryEnvGeneratorCalculator"
+  output_side_packet: "ENVIRONMENT:environment"
+  node_options: {
+    [type.googleapis.com/mediapipe.FaceGeometryEnvGeneratorCalculatorOptions] {
+      environment: {
+        origin_point_location: TOP_LEFT_CORNER
+        perspective_camera: {
+          vertical_fov_degrees: 63.0
+          near: 1.0
+          far: 10000.0
+        }
+      }
+    }
+  }
+}
+
+node {
+  calculator: "FaceGeometryPipelineCalculator"
+  input_side_packet: "ENVIRONMENT:environment"
+  input_stream: "IMAGE_SIZE:image_size"
+  input_stream: "MULTI_FACE_LANDMARKS:multi_face_landmarks"
+  output_stream: "MULTI_FACE_GEOMETRY:multi_face_geometry"
+  node_options: {
+    [type.googleapis.com/mediapipe.FaceGeometryPipelineCalculatorOptions] {
+      metadata_path: "mediapipe/modules/face_geometry/data/geometry_pipeline_metadata_including_iris_landmarks.binarypb"
+    }
+  }
+}
